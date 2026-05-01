@@ -11,6 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import pandas as pd
 from pyspark.sql import DataFrame, Window
 from pyspark.sql import functions as F
 
@@ -40,14 +41,18 @@ def _rolling_slope(df: DataFrame, window: Window, n: int, col: str) -> DataFrame
 
 def add_degradation_slopes(df: DataFrame) -> DataFrame:
     clean = df.filter(F.col("clean_lap"))
-    w = Window.partitionBy("driver_code", "race_name", "stint").orderBy("lap_number")
+    w = Window.partitionBy("year", "race_round", "driver_code", "stint").orderBy("lap_number")
     clean = _rolling_slope(clean, w, 3, "degradation_slope_3")
     clean = _rolling_slope(clean, w, 5, "degradation_slope_5")
     slope_cols = clean.select(
-        "driver_code", "race_name", "stint", "lap_number",
+        "year", "race_round", "driver_code", "stint", "lap_number",
         "degradation_slope_3", "degradation_slope_5",
     )
-    return df.join(slope_cols, on=["driver_code", "race_name", "stint", "lap_number"], how="left")
+    return df.join(
+        slope_cols,
+        on=["year", "race_round", "driver_code", "stint", "lap_number"],
+        how="left",
+    )
 
 
 def compound_age_baselines(df: DataFrame) -> DataFrame:
@@ -69,7 +74,7 @@ def add_field_baselines(df: DataFrame) -> DataFrame:
     clean_slope = F.when(F.col("clean_lap"), F.col("degradation_slope_5"))
     clean_pace = F.when(F.col("clean_lap"), F.col("pace_delta"))
     field = (
-        df.groupBy("race_name", "lap_number")
+        df.groupBy("year", "race_round", "lap_number")
         .agg(
             F.percentile_approx(clean_slope, 0.5).alias("field_median_degradation_slope"),
             F.percentile_approx(clean_pace, 0.5).alias("field_median_pace_delta"),
@@ -77,7 +82,7 @@ def add_field_baselines(df: DataFrame) -> DataFrame:
             F.stddev_pop(clean_pace).alias("field_std_pace_delta"),
         )
     )
-    out = df.join(field, on=["race_name", "lap_number"], how="left")
+    out = df.join(field, on=["year", "race_round", "lap_number"], how="left")
     out = out.withColumn(
         "driver_vs_field_delta",
         F.col("degradation_slope_5") - F.col("field_median_degradation_slope"),
@@ -221,6 +226,55 @@ def report(events: DataFrame, baselines: DataFrame) -> None:
     )
 
 
+def _score_anomaly(replay_pdf):
+    """Add anomaly_score + is_anomaly to a pandas frame using the persisted model.
+
+    Returns the input dataframe with two new columns. If the model file is
+    missing or required feature columns are absent, fills nulls and warns.
+    """
+    import numpy as np
+
+    if not config.ANOMALY_MODEL_PATH.exists():
+        log.warning(
+            "Anomaly model not found at %s. Skipping anomaly scoring. "
+            "Run features/train_anomaly_model.py first.",
+            config.ANOMALY_MODEL_PATH,
+        )
+        replay_pdf["anomaly_score"] = np.nan
+        replay_pdf["is_anomaly"] = False
+        return replay_pdf
+
+    import joblib
+    payload = joblib.load(config.ANOMALY_MODEL_PATH)
+    model = payload["model"]
+    feature_cols = payload["feature_cols"]
+
+    missing = [c for c in feature_cols if c not in replay_pdf.columns]
+    if missing:
+        log.warning("Replay frame missing model features %s. Anomaly score=null.", missing)
+        replay_pdf["anomaly_score"] = np.nan
+        replay_pdf["is_anomaly"] = False
+        return replay_pdf
+
+    X = replay_pdf[feature_cols].to_numpy(dtype=np.float64)
+    valid_mask = ~np.isnan(X).any(axis=1)
+    scores = np.full(len(X), np.nan)
+    preds = np.zeros(len(X), dtype=bool)
+    if valid_mask.any():
+        Xv = X[valid_mask]
+        scores[valid_mask] = model.score_samples(Xv)
+        preds[valid_mask] = (model.predict(Xv) == -1)
+    replay_pdf = replay_pdf.copy()
+    replay_pdf["anomaly_score"] = scores
+    replay_pdf["is_anomaly"] = preds
+    log.info(
+        "Anomaly scoring: scored=%d anomalies=%d (%.2f%%)",
+        int(valid_mask.sum()), int(preds.sum()),
+        100.0 * preds.sum() / max(valid_mask.sum(), 1),
+    )
+    return replay_pdf
+
+
 def main() -> None:
     spark = get_spark("f1-degradation-baselines")
     log.info("Reading: %s", config.LAP_FEATURES_PARQUET)
@@ -235,7 +289,36 @@ def main() -> None:
     report(df, baselines)
 
     baselines.coalesce(1).write.mode("overwrite").parquet(str(config.DEGRADATION_BASELINES_PARQUET))
-    df.coalesce(1).write.mode("overwrite").parquet(str(config.RACE_REPLAY_EVENTS_PARQUET))
+
+    replay = df.filter(
+        (F.col("year") == F.lit(config.DEMO_SEASON))
+        & (F.col("race_name") == F.lit(config.DEMO_RACE))
+    )
+    replay_count = replay.count()
+    log.info(
+        "Replay events filtered to %s %s: %d rows",
+        config.DEMO_SEASON, config.DEMO_RACE, replay_count,
+    )
+    out_path = Path(str(config.RACE_REPLAY_EVENTS_PARQUET))
+    if replay_count == 0:
+        log.warning(
+            "Replay event set empty. Live demo will have no data. "
+            "Verify ingestion includes %s %s.",
+            config.DEMO_SEASON, config.DEMO_RACE,
+        )
+        replay.coalesce(1).write.mode("overwrite").parquet(str(out_path))
+    else:
+        replay_pdf = replay.toPandas()
+        replay_pdf = _score_anomaly(replay_pdf)
+        if out_path.exists():
+            if out_path.is_dir():
+                import shutil
+                shutil.rmtree(out_path)
+            else:
+                out_path.unlink()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        replay_pdf.to_parquet(out_path, index=False)
+
     log.info("Wrote -> %s", config.DEGRADATION_BASELINES_PARQUET)
     log.info("Wrote -> %s", config.RACE_REPLAY_EVENTS_PARQUET)
     spark.stop()

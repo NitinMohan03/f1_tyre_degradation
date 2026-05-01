@@ -32,6 +32,8 @@ PAYLOAD_FIELDS = [
     "driver_vs_field_delta", "compound_baseline_delta", "compound_baseline_slope",
     "pace_component", "slope_component", "field_component",
     "risk_score", "risk_status",
+    "air_temp_c", "track_temp_c", "humidity", "rainfall", "wind_speed",
+    "anomaly_score", "is_anomaly",
 ]
 
 TYPICAL_LAP_SECONDS = 90.0

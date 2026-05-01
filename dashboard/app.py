@@ -64,6 +64,12 @@ def load_drivers(r: redis.Redis) -> pd.DataFrame:
             "risk_score": _f(h.get("risk_score"), 0.0),
             "risk_status": h.get("risk_status", "INSUFFICIENT_DATA"),
             "consecutive_high": int(_f(h.get("consecutive_high"), 0)),
+            "track_temp_c": _f(h.get("track_temp_c")),
+            "air_temp_c": _f(h.get("air_temp_c")),
+            "rainfall": (h.get("rainfall", "") in {"True", "true", "1"}),
+            "wind_speed": _f(h.get("wind_speed")),
+            "anomaly_score": _f(h.get("anomaly_score")),
+            "is_anomaly": (h.get("is_anomaly", "") in {"True", "true", "1"}),
             "timestamp": h.get("timestamp", ""),
         })
     return pd.DataFrame(rows)
@@ -113,6 +119,19 @@ def render_header(race: dict, drivers: pd.DataFrame) -> None:
     cols[2].metric("Drivers", len(drivers))
     cols[3].metric("Last update (UTC)", race.get("updated_at", "—")[:19].replace("T", " "))
 
+    if not drivers.empty and "track_temp_c" in drivers.columns:
+        track_temp = drivers["track_temp_c"].dropna()
+        air_temp = drivers["air_temp_c"].dropna()
+        wind = drivers["wind_speed"].dropna()
+        wet = bool(drivers["rainfall"].any())
+        anomalies = int(drivers["is_anomaly"].sum()) if "is_anomaly" in drivers.columns else 0
+        wcols = st.columns(5)
+        wcols[0].metric("Track temp", f"{track_temp.mean():.1f}°C" if len(track_temp) else "—")
+        wcols[1].metric("Air temp", f"{air_temp.mean():.1f}°C" if len(air_temp) else "—")
+        wcols[2].metric("Wind", f"{wind.mean():.1f} m/s" if len(wind) else "—")
+        wcols[3].metric("Conditions", "WET" if wet else "Dry")
+        wcols[4].metric("ML anomalies (live)", anomalies)
+
 
 def render_driver_cards(drivers: pd.DataFrame) -> None:
     if drivers.empty:
@@ -128,6 +147,11 @@ def render_driver_cards(drivers: pd.DataFrame) -> None:
             pace = f"{row['pace_delta']:+.3f}s" if row["pace_delta"] is not None else "—"
             tyre = f"{int(row['tyre_life'])}" if row["tyre_life"] is not None else "—"
             risk = f"{row['risk_score']:.2f}"
+            anomaly_badge = ""
+            if row.get("is_anomaly"):
+                a_score = row.get("anomaly_score")
+                a_str = f"{a_score:.3f}" if isinstance(a_score, (int, float)) else "?"
+                anomaly_badge = f"<div style=\"margin-top:2px;color:#f472b6\">⚠ ML anomaly ({a_str})</div>"
             col.markdown(
                 f"""<div style="border-left:6px solid {color};padding:8px 12px;border-radius:4px;background:#111827;color:#f3f4f6">
 <div style="font-size:1.2rem;font-weight:700">{row['driver_code']}</div>
@@ -136,6 +160,7 @@ def render_driver_cards(drivers: pd.DataFrame) -> None:
 <div>lap {row['lap_number']} · {lap_time}</div>
 <div>pace Δ {pace}</div>
 <div style="margin-top:4px"><b>risk {risk}</b> · <span style="color:{color}">{row['risk_status']}</span></div>
+{anomaly_badge}
 </div>""",
                 unsafe_allow_html=True,
             )

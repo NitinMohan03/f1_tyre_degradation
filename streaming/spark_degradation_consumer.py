@@ -61,6 +61,13 @@ EVENT_SCHEMA = StructType([
     StructField("field_component", DoubleType()),
     StructField("risk_score", DoubleType()),
     StructField("risk_status", StringType()),
+    StructField("air_temp_c", DoubleType()),
+    StructField("track_temp_c", DoubleType()),
+    StructField("humidity", DoubleType()),
+    StructField("rainfall", BooleanType()),
+    StructField("wind_speed", DoubleType()),
+    StructField("anomaly_score", DoubleType()),
+    StructField("is_anomaly", BooleanType()),
     StructField("event_time", StringType()),
 ])
 
@@ -128,6 +135,13 @@ def write_batch_to_redis(batch_df: DataFrame, batch_id: int) -> None:
             "field_delta": _f(d.get("field_delta")),
             "risk_score": _f(d.get("risk_score")),
             "risk_status": _f(d.get("risk_status")),
+            "air_temp_c": _f(d.get("air_temp_c")),
+            "track_temp_c": _f(d.get("track_temp_c")),
+            "humidity": _f(d.get("humidity")),
+            "rainfall": _f(d.get("rainfall")),
+            "wind_speed": _f(d.get("wind_speed")),
+            "anomaly_score": _f(d.get("anomaly_score")),
+            "is_anomaly": _f(d.get("is_anomaly")),
             "consecutive_high": str(new_n),
             "timestamp": now_iso,
         }
@@ -147,12 +161,19 @@ def write_batch_to_redis(batch_df: DataFrame, batch_id: int) -> None:
         risk_score = d.get("risk_score") or 0.0
         consecutive_alert = is_clean and is_high and new_n >= config.ALERT_HIGH_CONSECUTIVE
         fallback_alert = is_clean and (risk_score >= config.ALERT_FALLBACK_RISK)
-        if consecutive_alert or fallback_alert:
-            reason = (
-                f"HIGH risk for {new_n} consecutive clean laps"
-                if consecutive_alert
-                else f"Risk score {risk_score:.2f} >= fallback threshold {config.ALERT_FALLBACK_RISK}"
-            )
+        ml_only_alert = (
+            is_clean
+            and bool(d.get("is_anomaly"))
+            and not is_high
+            and not fallback_alert
+        )
+        if consecutive_alert or fallback_alert or ml_only_alert:
+            if consecutive_alert:
+                reason = f"HIGH risk for {new_n} consecutive clean laps"
+            elif fallback_alert:
+                reason = f"Risk score {risk_score:.2f} >= fallback threshold {config.ALERT_FALLBACK_RISK}"
+            else:
+                reason = f"ML anomaly (score={d.get('anomaly_score')}) without rule-based HIGH"
             alert = {
                 "lap": d.get("lap_number"),
                 "driver_code": code,
