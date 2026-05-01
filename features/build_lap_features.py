@@ -38,7 +38,7 @@ def add_clean_lap(df: DataFrame) -> DataFrame:
 
 
 def add_stint_counters(df: DataFrame) -> DataFrame:
-    w_stint = Window.partitionBy("driver_code", "race_name", "stint").orderBy("lap_number")
+    w_stint = Window.partitionBy("year", "race_round", "driver_code", "stint").orderBy("lap_number")
     return (
         df.withColumn("stint_lap_number", F.row_number().over(w_stint))
         .withColumn(
@@ -61,7 +61,7 @@ def add_tyre_age_bucket(df: DataFrame) -> DataFrame:
 
 
 def add_rolling_pace(df: DataFrame) -> DataFrame:
-    w = Window.partitionBy("driver_code", "race_name", "stint").orderBy("lap_number")
+    w = Window.partitionBy("year", "race_round", "driver_code", "stint").orderBy("lap_number")
     clean_time = F.when(F.col("clean_lap"), F.col("lap_time_sec"))
     return (
         df.withColumn("rolling_3_lap_avg", F.avg(clean_time).over(w.rowsBetween(-2, 0)))
@@ -74,10 +74,10 @@ def add_rolling_pace(df: DataFrame) -> DataFrame:
 def add_field_median(df: DataFrame) -> DataFrame:
     clean_time = F.when(F.col("clean_lap"), F.col("lap_time_sec"))
     field = (
-        df.groupBy("race_name", "lap_number")
+        df.groupBy("year", "race_round", "lap_number")
         .agg(F.percentile_approx(clean_time, 0.5).alias("field_median_lap_time"))
     )
-    out = df.join(field, on=["race_name", "lap_number"], how="left")
+    out = df.join(field, on=["year", "race_round", "lap_number"], how="left")
     return out.withColumn("field_delta", F.col("lap_time_sec") - F.col("field_median_lap_time"))
 
 
@@ -112,10 +112,23 @@ def report(df: DataFrame) -> None:
     stint_clean.show(40, truncate=False)
 
 
+def _resolve_input_path() -> str:
+    partitions = list(config.RAW_LAPS_DIR.glob("year=*/round=*/laps.parquet"))
+    if partitions:
+        return str(config.RAW_LAPS_DIR)
+    if config.RAW_LAPS_PARQUET.exists():
+        return str(config.RAW_LAPS_PARQUET)
+    raise FileNotFoundError(
+        f"No raw lap data found. Expected partitions under {config.RAW_LAPS_DIR} "
+        f"or single file at {config.RAW_LAPS_PARQUET}."
+    )
+
+
 def main() -> None:
     spark = get_spark("f1-lap-features")
-    log.info("Reading: %s", config.RAW_LAPS_PARQUET)
-    raw = spark.read.parquet(str(config.RAW_LAPS_PARQUET))
+    in_path = _resolve_input_path()
+    log.info("Reading: %s", in_path)
+    raw = spark.read.parquet(in_path)
 
     feats = build(raw).cache()
     report(feats)

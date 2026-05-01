@@ -35,15 +35,51 @@ LAP_COLUMNS_REQUIRED = [
     "PitOutTime",
     "TrackStatus",
     "IsAccurate",
+    "LapStartTime",
 ]
+
+WEATHER_COL_MAP = {
+    "AirTemp": "air_temp_c",
+    "TrackTemp": "track_temp_c",
+    "Humidity": "humidity",
+    "Pressure": "pressure",
+    "Rainfall": "rainfall",
+    "WindSpeed": "wind_speed",
+    "WindDirection": "wind_direction",
+}
 
 
 def load_session(year: int, race: str, session_code: str):
     fastf1.Cache.enable_cache(str(config.FASTF1_CACHE_DIR))
     log.info("Loading FastF1 session: %s %s %s", year, race, session_code)
     session = fastf1.get_session(year, race, session_code)
-    session.load(laps=True, telemetry=False, weather=False, messages=False)
+    session.load(laps=True, telemetry=False, weather=True, messages=False)
     return session
+
+
+def _attach_weather(df: pd.DataFrame, session) -> pd.DataFrame:
+    """Asof-merge nearest weather sample before each lap start time."""
+    weather = session.weather_data
+    if weather is None or weather.empty:
+        log.warning("No weather data for session; weather columns will be null.")
+        for out_col in WEATHER_COL_MAP.values():
+            df[out_col] = pd.NA
+        return df
+
+    w = weather[["Time"] + list(WEATHER_COL_MAP.keys())].copy()
+    w = w.rename(columns=WEATHER_COL_MAP).sort_values("Time").reset_index(drop=True)
+
+    df = df.copy()
+    df["_lap_start_td"] = pd.to_timedelta(df["lap_start_time_sec"], unit="s")
+    df_sorted = df.sort_values("_lap_start_td").reset_index()
+
+    merged = pd.merge_asof(
+        df_sorted, w,
+        left_on="_lap_start_td", right_on="Time",
+        direction="backward", allow_exact_matches=True,
+    )
+    merged = merged.sort_values("index").drop(columns=["index", "_lap_start_td", "Time"])
+    return merged.reset_index(drop=True)
 
 
 def laps_to_dataframe(session) -> pd.DataFrame:
@@ -75,6 +111,7 @@ def laps_to_dataframe(session) -> pd.DataFrame:
     df["pit_out_time"] = timedelta_to_seconds(laps["PitOutTime"])
     df["track_status"] = laps["TrackStatus"].astype("string")
     df["is_accurate"] = laps["IsAccurate"].astype("boolean")
+    df["lap_start_time_sec"] = timedelta_to_seconds(laps["LapStartTime"])
     return df
 
 
@@ -90,6 +127,15 @@ def report(df: pd.DataFrame) -> None:
         df["lap_number"].max(),
     )
     log.info("Compounds: %s", df["compound"].dropna().unique().tolist())
+    if "track_temp_c" in df.columns:
+        log.info(
+            "Track temp range: %.1f..%.1f (missing: %d)",
+            float(df["track_temp_c"].min()) if df["track_temp_c"].notna().any() else float("nan"),
+            float(df["track_temp_c"].max()) if df["track_temp_c"].notna().any() else float("nan"),
+            df["track_temp_c"].isna().sum(),
+        )
+        if "rainfall" in df.columns:
+            log.info("Wet laps (rainfall=True): %d", int(df["rainfall"].astype("boolean").fillna(False).sum()))
 
 
 def parse_args() -> argparse.Namespace:
@@ -97,18 +143,45 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--year", type=int, default=config.DEMO_SEASON)
     p.add_argument("--race", type=str, default=config.DEMO_RACE)
     p.add_argument("--session", type=str, default=config.DEMO_SESSION)
-    p.add_argument("--output", type=Path, default=config.RAW_LAPS_PARQUET)
+    p.add_argument("--output", type=Path, default=None,
+                   help="Override output path. Defaults to partitioned path data/raw/laps/year=YYYY/round=NN/laps.parquet.")
+    p.add_argument("--skip-if-exists", action="store_true",
+                   help="Skip ingestion if the partition output file already exists.")
     return p.parse_args()
+
+
+def ingest_one(year: int, race: str, session_code: str, output: Path | None = None,
+               skip_if_exists: bool = False) -> Path | None:
+    """Ingest a single race session. Returns output path or None if skipped.
+
+    If output is None and skip_if_exists is True, caller must pre-compute the
+    partition path (round number requires loading the session). Use
+    config.raw_laps_partition_path(year, race_round) when round number is known.
+    """
+    if output is not None and skip_if_exists and output.exists():
+        log.info("Skip (exists): %s", output)
+        return None
+
+    session = load_session(year, race, session_code)
+    if output is None:
+        race_round = int(session.event["RoundNumber"])
+        output = config.raw_laps_partition_path(year, race_round)
+        if skip_if_exists and output.exists():
+            log.info("Skip (exists): %s", output)
+            return None
+
+    df = laps_to_dataframe(session)
+    df = _attach_weather(df, session)
+    report(df)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(output, index=False)
+    log.info("Wrote %d rows -> %s", len(df), output)
+    return output
 
 
 def main() -> None:
     args = parse_args()
-    session = load_session(args.year, args.race, args.session)
-    df = laps_to_dataframe(session)
-    report(df)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(args.output, index=False)
-    log.info("Wrote %d rows -> %s", len(df), args.output)
+    ingest_one(args.year, args.race, args.session, args.output, args.skip_if_exists)
 
 
 if __name__ == "__main__":

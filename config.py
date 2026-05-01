@@ -4,21 +4,30 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 
 DATA_DIR = PROJECT_ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
+RAW_LAPS_DIR = RAW_DIR / "laps"
 PROCESSED_DIR = DATA_DIR / "processed"
 FASTF1_CACHE_DIR = DATA_DIR / "cache"
+MODELS_DIR = PROJECT_ROOT / "models"
 
-for _d in (RAW_DIR, PROCESSED_DIR, FASTF1_CACHE_DIR):
+for _d in (RAW_DIR, RAW_LAPS_DIR, PROCESSED_DIR, FASTF1_CACHE_DIR, MODELS_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 RAW_LAPS_PARQUET = RAW_DIR / "fastf1_laps.parquet"
 LAP_FEATURES_PARQUET = PROCESSED_DIR / "lap_features.parquet"
 DEGRADATION_BASELINES_PARQUET = PROCESSED_DIR / "degradation_baselines.parquet"
 RACE_REPLAY_EVENTS_PARQUET = PROCESSED_DIR / "race_replay_events.parquet"
+ANOMALY_MODEL_PATH = MODELS_DIR / "isoforest_v1.joblib"
+
+
+def raw_laps_partition_path(year: int, race_round: int) -> Path:
+    return RAW_LAPS_DIR / f"year={year}" / f"round={race_round:02d}" / "laps.parquet"
+
 
 DEMO_SEASON = 2024
 DEMO_RACE = "Bahrain Grand Prix"
 DEMO_SESSION = "R"
 BACKUP_RACES = ["Spanish Grand Prix", "Hungarian Grand Prix"]
+INGEST_SEASONS = [2024]
 
 KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
 KAFKA_TOPIC = "f1-lap-events"
