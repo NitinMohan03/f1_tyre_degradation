@@ -4,40 +4,32 @@ Resume point. Update every session. Keep < 60 lines.
 
 ## Current phase
 
-**ALL PHASES DONE.** End-to-end verified: ingest → features → baselines → Kafka → Spark Streaming → Redis → Streamlit.
+**Phases 10–13 code complete.** Single-race demo (Bahrain 2024) re-validated: 1129 rows, 90 anomalies (8.97%), weather attached, DuckDB views queryable. Pipeline still backwards-compatible with single-file raw parquet.
 
 ## Phase status
 
-- [x] Phase 1 — skeleton
-- [x] Phase 2 — FastF1 ingestion (1129 rows verified)
-- [x] Phase 3 — lap features (1024/1129 clean)
-- [x] Phase 4 — baselines + replay events (1129 events, 10 baselines, risk LOW/MED/INSUF/HIGH = 543/224/187/175)
-- [x] Phase 5 — Docker stack (apache/kafka:3.7.1 KRaft + redis:7.4-alpine)
-- [x] Phase 6 — Kafka producer (verified 100 msgs)
-- [x] Phase 7 — Spark Streaming consumer (verified 20 driver hashes + alerts)
-- [x] Phase 8 — Streamlit dashboard (verified, no bugs)
-- [x] Phase 9 — docs (README expanded, CHANGELOG created)
-
-Detailed phase notes archived in `docs/CHANGELOG.md`.
+- [x] Phase 1–9 — base pipeline (see `docs/CHANGELOG.md`)
+- [x] Phase 10 — multi-race ingestion (partitioned parquet, season sweep script)
+- [x] Phase 11 — weather join (asof merge, weather cols through replay → Kafka → Redis → dashboard)
+- [x] Phase 12 — IsolationForest anomaly (model trained, scored 1003 events, ML-only alert rule active)
+- [x] Phase 13 — DuckDB explore page (`dashboard/pages/01_Explore.py`, 6 canned queries + free SQL)
 
 ## Next action
 
-Demo + final commit. Suggested commit groups (Conventional Commits, one per phase):
-```bash
-git add config.py docker-compose.yml requirements.txt README.md .gitignore && git commit -m "chore: project skeleton"
-git add ingestion/ utils/logging.py utils/time_utils.py && git commit -m "feat(ingest): FastF1 lap ingestion"
-git add utils/spark.py features/build_lap_features.py && git commit -m "feat(features): lap features + clean_lap + rolling pace"
-git add features/build_degradation_baselines.py && git commit -m "feat(features): degradation baselines + risk score"
-git add streaming/kafka_lap_replay_producer.py && git commit -m "feat(streaming): Kafka lap replay producer"
-git add streaming/spark_degradation_consumer.py && git commit -m "feat(streaming): Spark consumer + Redis writes + alerts"
-git add dashboard/ && git commit -m "feat(dashboard): Streamlit live monitor"
-git add docs/ STATE.md CLAUDE.md && git commit -m "docs: README + CHANGELOG"
+Run actual season sweep to populate Big Data volume:
+```powershell
+.venv\Scripts\python.exe ingestion\sweep_season.py
+.venv\Scripts\python.exe features\build_lap_features.py
+.venv\Scripts\python.exe features\train_anomaly_model.py
+.venv\Scripts\python.exe features\build_degradation_baselines.py
 ```
+Sweep takes ~30–60 min on first run (FastF1 fetches ~24 sessions). Subsequent runs skip cached partitions. After sweep validate ≥25k laps via `ingestion/sweep_season.py` summary.
 
-Optional follow-ups:
-- Add tests for clean_lap + risk threshold (per CLAUDE.md "test critical logic only").
-- Try backup race: `python ingestion/ingest_fastf1_laps.py --race "Spanish Grand Prix"` then re-run features.
-- Telemetry aggregates (speed/throttle/brake) — spec marks optional.
+Suggested commits (one per phase):
+- `feat(ingest): multi-race season sweep with partitioned parquet`
+- `feat(features): weather join + temp-bucketed baselines`
+- `feat(ml): IsolationForest anomaly score in batch + stream`
+- `feat(dashboard): DuckDB explore page for historical OLAP`
 
 ## Blockers
 

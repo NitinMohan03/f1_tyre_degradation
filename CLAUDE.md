@@ -30,6 +30,10 @@ Primary: 2024 Bahrain GP. Backups: 2024 Spain, 2024 Hungary.
 - Spark-Kafka package: `org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.5`.
 - Field median slope: precomputed in batch, attached to replay events.
 - Alert state: Redis hash `driver:{CODE}` field `consecutive_high` for "HIGH × 2 laps" rule.
+- Multi-race corpus partitioned at `data/raw/laps/year=YYYY/round=NN/laps.parquet`. Spark auto-discovers via partition columns. Live demo still single-race (Bahrain 2024); baselines trained on full corpus.
+- Weather joined at ingestion via pandas asof merge on lap start time. Cols: `air_temp_c, track_temp_c, humidity, rainfall, wind_speed`. Baselines extended with `track_temp_bucket = floor(track_temp_c/5)*5`.
+- ML anomaly: `IsolationForest` (sklearn, contamination=0.05, n_estimators=200) trained on clean-lap features. Persisted to `models/isoforest_v1.joblib`. Adds `anomaly_score` + `is_anomaly` cols to replay events. Parallel signal to rule-based risk, not replacement.
+- DuckDB read-only OLAP page over `data/processed/**.parquet`. Streamlit multipage: Live (existing) + Explore (new). No new service.
 
 ## Folder structure
 
