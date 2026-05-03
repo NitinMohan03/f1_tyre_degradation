@@ -1,8 +1,8 @@
 # F1 Tyre Degradation Monitoring
 
-Near-real-time Formula 1 tyre degradation and race pace anomaly monitoring. Lambda-style Big Data pipeline: PySpark batch baselines → Kafka driver-lap event replay → Spark Structured Streaming → Redis live state → Streamlit dashboard.
+Near-real-time Formula 1 tyre degradation and race pace anomaly monitoring. Lambda-style data pipeline: PySpark batch baselines → Kafka driver-lap event replay → Spark Structured Streaming → Redis live state → Streamlit dashboard.
 
-Master's Big Data course project. Demo race: 2024 Bahrain Grand Prix.
+Primary race: 2024 Bahrain Grand Prix.
 
 ## Architecture
 
@@ -22,7 +22,7 @@ FastF1 → raw Parquet → PySpark features → baselines + race_replay_events P
                                           Streamlit dashboard (2s autorefresh)
 ```
 
-Risk score precomputed in batch (`race_replay_events.parquet`) per CLAUDE.md decision — Spark Streaming routes precomputed risk + applies consecutive-HIGH alert rule via Redis hash counter.
+Risk score precomputed in batch (`race_replay_events.parquet`) per architecture decision — Spark Streaming routes precomputed risk + applies consecutive-HIGH alert rule via Redis hash counter.
 
 ## Quick start
 
@@ -106,6 +106,6 @@ docker exec -it f1_redis redis-cli
 ## Spec / state
 
 - Authoritative spec: `F1_Tyre_Degradation_AI_Implementation_Prompt.md`
-- Project memory: `CLAUDE.md` (architecture decisions)
+- Architecture decisions: `docs/DECISIONS.md`
 - Resume point: `STATE.md`
 - Phase history: `docs/CHANGELOG.md`

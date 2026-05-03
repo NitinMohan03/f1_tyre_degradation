@@ -302,7 +302,7 @@ def main() -> None:
     out_path = Path(str(config.RACE_REPLAY_EVENTS_PARQUET))
     if replay_count == 0:
         log.warning(
-            "Replay event set empty. Live demo will have no data. "
+            "Replay event set empty. Live pipeline will have no data. "
             "Verify ingestion includes %s %s.",
             config.DEMO_SEASON, config.DEMO_RACE,
         )

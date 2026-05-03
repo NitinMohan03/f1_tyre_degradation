@@ -1,7 +1,7 @@
 """Phase 7: Spark Structured Streaming consumer.
 
 Reads Kafka topic f1-lap-events, parses JSON, writes per-driver state, history,
-and alerts to Redis. Risk is precomputed in batch (per CLAUDE.md decision) so
+and alerts to Redis. Risk is precomputed in batch (per architecture decision) so
 Spark side only routes + applies the consecutive-HIGH alert rule via Redis hash.
 """
 from __future__ import annotations

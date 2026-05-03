@@ -4,7 +4,7 @@ Resume point. Update every session. Keep < 60 lines.
 
 ## Current phase
 
-**Phases 10–13 code complete.** Single-race demo (Bahrain 2024) re-validated: 1129 rows, 90 anomalies (8.97%), weather attached, DuckDB views queryable. Pipeline still backwards-compatible with single-file raw parquet.
+**Phases 10–13 code complete.** Single-race run (Bahrain 2024) re-validated: 1129 rows, 90 anomalies (8.97%), weather attached, DuckDB views queryable. Pipeline still backwards-compatible with single-file raw parquet.
 
 ## Phase status
 
@@ -16,7 +16,7 @@ Resume point. Update every session. Keep < 60 lines.
 
 ## Next action
 
-Run actual season sweep to populate Big Data volume:
+Run actual season sweep to populate full corpus volume:
 ```powershell
 .venv\Scripts\python.exe ingestion\sweep_season.py
 .venv\Scripts\python.exe features\build_lap_features.py
@@ -38,14 +38,14 @@ None.
 ## Quick commands
 
 ```powershell
-# Full demo (4 terminals)
+# Full live pipeline (4 terminals)
 docker-compose up -d
 python streaming/spark_degradation_consumer.py     # T1
 python streaming/kafka_lap_replay_producer.py --speed 30   # T2
 streamlit run dashboard/app.py                     # T3
 docker exec -it f1_redis redis-cli                 # T4 inspect
 
-# Reset Redis state mid-demo
+# Reset Redis state mid-run
 docker exec f1_redis redis-cli FLUSHDB
 
 # Reset Kafka offsets / topic (if consumer stuck)

@@ -2,7 +2,7 @@
 
 Reads parquet directly via DuckDB. No Spark, no Redis — pure batch surface.
 Pre-canned queries cover the most useful analytical lookups; the free SQL box
-lets viva examiners run anything they want.
+lets analysts run anything they want.
 
 DuckDB views are read-only by construction (parquet files on disk). The free
 SQL box additionally rejects any DDL/DML keywords as defence in depth.
