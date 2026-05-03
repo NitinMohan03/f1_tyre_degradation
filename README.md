@@ -103,7 +103,7 @@ docker exec -it f1_redis redis-cli
 > GET race:current
 ```
 
-## Spec / state
+## Spec / State
 
 - Authoritative spec: `F1_Tyre_Degradation_AI_Implementation_Prompt.md`
 - Architecture decisions: `docs/DECISIONS.md`
